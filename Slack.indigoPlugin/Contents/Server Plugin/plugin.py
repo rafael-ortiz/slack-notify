@@ -1,6 +1,6 @@
 #! /usr/bin/env python2.5
 # -*- coding: utf-8 -*-
-
+import ast
 import indigo
 import simplejson
 import urlparse, httplib
@@ -20,6 +20,8 @@ class Plugin(indigo.PluginBase):
     def __init__(self, pluginId, pluginDisplayName, pluginVersion, pluginPrefs):
         indigo.PluginBase.__init__(self, pluginId, pluginDisplayName, pluginVersion, pluginPrefs)
         self.debug = pluginPrefs.get("showDebugInfo", False)
+        self.channels = {}
+        self.config = {}
 
     def __del__(self):
         indigo.PluginBase.__del__(self)
@@ -27,6 +29,24 @@ class Plugin(indigo.PluginBase):
     def startup(self):
         self.debugLog(u"startup called")
         self.debugLog(u"Indigo log path: %s" % self.returnlogpath ()[0:-1] )
+
+        self.config['auth'] = {
+            'url_token': self.pluginPrefs.get('urltoken','').strip(),
+            'slack_token': self.pluginPrefs.get('slacktoken','').strip(),
+            'user_id':  self.pluginPrefs.get('userid','').strip()
+        }
+
+        self.config['api'] = {
+            'channel_list': 'https://slack.com/api/channels.list',
+            'file_upload': 'https://slack.com/api/files.upload',
+            'user_info': 'https://slack.com/api/users.info',
+            'service_url': "https://hooks.slack.com/services/%s" % (self.config['auth']['url_token'])
+        }
+
+        ## Get the slack user details once on startup, instead of before every message
+        self.refresh_slack_data()
+        self.debugLog(u"startup complete")
+
 
     def shutdown(self):
         self.debugLog(u"shutdown called")
@@ -57,6 +77,53 @@ class Plugin(indigo.PluginBase):
                 continue
             # raise IOError
 
+    def refresh_slack_data(self):
+        self.config['user'] = self._get_user_info()
+        self.channels = self._get_channels()
+
+
+    def _get_channels(self):
+        channels = {}
+
+        self.debugLog("Loading Slack channels")
+
+        params = {
+            'token': self.config['auth']['slack_token'],
+            'pretty': 1
+        }
+
+        url = self.config['api']['channel_list']
+
+        result = self._do_slack_request_get(url,params)
+
+        if result is None:
+            self.errorLog("Failed to get Slack channel names")
+            return channels
+
+        cl = simplejson.loads(result)
+
+        for chan in cl['channels']:
+            channel = {}
+
+            if not chan.get('is_channel',False):
+                continue
+
+            if chan.get('is_archived',False):
+                continue
+
+            if chan['name'] in channels.keys():
+                continue
+
+            channels[chan['name']] = {
+                'id': chan['id']
+            }
+
+        self.debugLog("Slack Channels: %s" % (channels))
+
+        return channels
+
+
+
     def getChannelNames(self):
         slackToken = self.pluginPrefs['slacktoken'].strip()
         params = urllib.urlencode({'token': slackToken, 'pretty': 1})
@@ -83,10 +150,21 @@ class Plugin(indigo.PluginBase):
                 card = (oList[i],cList[i])
                 deck.append(card)
                 break
+
+        self.debugLog(deck)
         return deck
 
     def channelListGenerator(self, filter="", valuesDict=None, typeId="", targetId=0):
-        return self.getChannelNames()
+        chanlist = []
+        for name,chan in self.channels.iteritems():
+            cl = (name,name)
+            chanlist.append(cl)
+
+        return chanlist
+
+
+    # def channelListGenerator(self, filter="", valuesDict=None, typeId="", targetId=0):
+    #     return self.getChannelNames()
 
     def validatePrefsConfigUi(self, valuesDict):
         self.debugLog(u"validatePrefsConfigUi() method called")
@@ -132,167 +210,316 @@ class Plugin(indigo.PluginBase):
         if self.debug is True:
             self.debugLog(u"Debugging on")
             self.debugLog(unicode(u"Debugging set to: %s" % self.pluginPrefs[u"showDebugInfo"]))
-        else:
-            self.debugLog(u"Debugging off")
 
-    def notify(self, pluginAction):
-        # get pluginAction variables #################################################################
-        if pluginAction.props['text'] is None or pluginAction.props['text'] == "":
-            indigo.server.log(u"No text was entered.")
-        else:
-            txtInput = pluginAction.props['text'].strip()
-            txtInput = txtInput.strip()
-            while "%%v:" in txtInput:
-                txtInput = self.substituteVariable(txtInput)
-            self.debugLog(u"Text entered: %s" % txtInput)
-            # fix issue with special characters
-            theText = txtInput.encode('utf8')
 
-        if pluginAction.props['imageurl'] is None or pluginAction.props['imageurl'] == "":
-            self.debugLog(u"No image url was entered")
-        else:
-            imgInput = pluginAction.props['imageurl'].strip()
-            shortURL = self.shorten(imgInput)
-            imgInput = shortURL.strip()
-            theImageURL = imgInput.encode('utf8')
-            self.debugLog(u"Image URL: %s" % imgInput)
+    def upload(self, pluginAction):
+        uploadParams = {
+            'file': None,
+            'title': '',
+            'comment': '',
+            'channels': None,
+            'token': self.config['auth']['slack_token']
+        }
 
-        theChannel = '#' + pluginAction.props['channel']
-        theDM = '@' + pluginAction.props['directMessage'].strip()
-        if theChannel == "" and theDM == "":
-            indigo.server.log(u"Enter either a channel OR a DM to post to.")
-        elif theChannel == "" and theDM:
-            theChannel = theDM
-        theUsername = pluginAction.props['username'].strip()
-        theIcon = pluginAction.props['icon'].strip()
-        theFilePath = pluginAction.props['filename']
-        ##############################################################################################
+        filePath = pluginAction.props['filename'].strip()
 
-        # get pluginPrefs variables ##################################################################
-        URLtoken = self.pluginPrefs['urltoken'].strip()
-        slackToken = self.pluginPrefs['slacktoken'].strip()
-        userID = self.pluginPrefs['userid'].strip()
-        ##############################################################################################
+        if filePath is not None:
+            while "%%v:" in filePath:
+                filePath = self.substituteVariable(filePath)
 
-        # get Slack user variables ###################################################################
-        params = urllib.urlencode({'token': slackToken, 'user': userID, 'pretty': 1})
-        url = urllib.urlopen("https://slack.com/api/users.info?%s" % params)
-        url = url.geturl()
-        self.debugLog(u"URL for user variables: %s" % url)
+        self.debugLog(u"Preparing to upload file from %s" % (filePath))
 
         try:
-            j = urllib2.urlopen(url)
-            varstring = j.read()
-            js = simplejson.loads(varstring)
-            if js.get('ok') in [False]:
-                raise Exception(js.get('error'))
-                self.errorLog(u"False response getting user variables: %s" % js.get('error'))
-            loadOK = js['ok']
-            userID = js['user']['id']
-            userName = '@' + js['user']['name']
-            userDeleted = js['user']['deleted']
-            userRealName = js['user']['real_name']
-            userColor = js['user']['color']
-            userEmail = js['user']['profile']['email']
-            userIconURL = js['user']['profile']['image_24']
-            self.debugLog(u"id: %s" % userID)
-            self.debugLog(u"name: %s" % userName)
-            self.debugLog(u"deleted: %s" % userDeleted)
-            self.debugLog(u"real name: %s" % userRealName)
-            self.debugLog(u"color: %s" % userColor)
-            self.debugLog(u"email: %s" % userEmail)
-            self.debugLog(u"icon: %s" % userIconURL)
-            # j.close()
-        except urllib2.HTTPError, e:
-            js = {}
-            self.errorLog(u"Unable to get Slack(var). HTTPError - %s" % unicode(e))
-        except urllib2.URLError, e:
-            js = {}
-            self.errorLog(u"Unable to get Slack(var). URLError - %s" % unicode(e))
-        except Exception, e:
-            js = {}
-            if "invalid literal for int() with base 16: ''" in e:
-                self.errorLog(u"Unable to get Slack(var) Obscure bug in Python 2.5.")
+            uploadParams['file'] = open(filePath,'rb')
+        except IOError, e:
+            self.errorLog("Failed to open file for upload: %s" % (e))
+            return None
+
+        uploadParams['filename'] = filePath
+
+        if len(pluginAction.props['filetitle']):
+            uploadParams['title'] = pluginAction.props['filetitle']
+
+        if len(pluginAction.props['filecomment']):
+            uploadParams['comment'] = pluginAction.props['filecomment']
+
+        channel = pluginAction.props['channel']
+        dm = pluginAction.props['directMessage'].strip()
+
+        if channel and dm:
+            channel = dm
+        elif not channel:
+            if not dm:
+                self.errorLog(u"Enter either a channel or DM to post to")
+                return None
             else:
-                self.errorLog(u"Unable to get Slack(var). Exception - %s" % unicode(e))
+                channel = dm
+
+        uploadParams['channels'] = channel
+
+        res = self._do_slack_request(url=self.config['api']['file_upload'], data=uploadParams,method="POST")
+        self.debugLog(u"File upload response: %s" % res)
+        
+        fres = simplejson.loads(res)
+
+        if fres is None:
+            self.errorLog(u"Upload request failed")
+            return None
+
+        if not fres.get('ok',False):
+            self.errorLog(u"File upload Failed: %s" % fres['error'])
+            return None
+
+        slack_file = fres.get('file',None)
+
+        if slack_file is not None:
+            indigo.server.log(u"File uploaded.")
+
+        return fres.get('file',None)
+
+    def _pick_channel(self, channel=None,dm=None):
+        if channel and dm:
+            channel = "@" + dm
+        elif not channel:
+            if not dm:
+                return None
+            else:
+                channel = "@" + dm
+        else:
+            channel = "#" + channel
+
+        return channel
+
+    def _get_user_info(self):
+        self.debugLog(u"Retreiving Slack user variables")
+
+        user = {}
+        
+        params = {
+            'token': self.config['auth']['slack_token'],
+            'user': self.config['auth']['user_id'],
+            'pretty': 1
+        }
+
+        result = self._do_slack_request_get(url=self.config['api']['user_info'], data=params)
+
+        if result is None:
+            self.errorLog(u"Unable to load Slack user variables")
+            return {}
+
+        js = simplejson.loads(result)
+
+        if js.get('ok', False) in [False]:
+            self.errorLog(u"Failed to get user variables: %s" % js.get('error'))
+            return {}
+
+        if 'user' in js:
+            user = js['user']
+
+        self.debugLog(u"Slack User: %s" % (user))
+
+        return user
+
+    def _get_gravatar_url(self, email=None):
+        default = "http://www.gravatar.com/avatar/c4ac5c1a595fe25bad7ddb2eb2d7c2f4?d=identicon"
+        size = 16
+
+        if email is None:
+            return default
+
+        email_digest = hashlib.md5(email.lower()).hexdigest()
+        gravatar_url = "http://www.gravatar.com/avatar/" + email_digest + "?"
+        gravatar_url += urllib.urlencode({'d':default, 's':str(size)})
+
+        return gravatar_url
+
+    def notify(self, pluginAction):
+        msgTxt = pluginAction.props['text'].strip()
+
+        if msgTxt is not None:
+            while "%%v:" in msgTxt:
+                msgTxt = self.substituteVariable(msgTxt)
+        else:
+            self.errorLog(u"No message text provided for Slack Notify.")
+            return None
+
+        self.debugLog(u"Message Text: %s" % (msgTxt))
+
+        msgChan = pluginAction.props['channel'].strip()
+        dm = pluginAction.props['directMessage'].strip()
+
+        isChannel = False
+        channel = self._pick_channel(msgChan, dm)
+
+        if channel is None:
+            self.errorLog(u"Enter either a channel OR a DM to post to.")
+            return None
+
+        if channel[0] == '#':
+            isChannel = True
+
+
+        ## Decide if we need to add a mention
+
+        enableMention = pluginAction.props.get('enableMention',False)
+        conditionalMention = pluginAction.props.get('conditionalMention',False)
+        mentionConditionVar = pluginAction.props.get('mentionConditionVar','').strip()
+        mentionConditionVal = pluginAction.props.get('mentionConditionVal','').strip()
+
+        if enableMention and isChannel:
+            mention = "<!channel>\n"            
+
+            if not conditionalMention:
+                msgTxt = mention + msgTxt
+            else:
+                varTestVal = self.substituteVariable("%%v:" + mentionConditionVar + "%%")
+                self.debugLog("mentionConditionVar: %s = %s " % (mentionConditionVar,varTestVal))
+                self.debugLog("mentionConditionVal: %s" % mentionConditionVal)
+
+                
+                ## Try converting the conditional value to a python object
+                ## if that fails, just do a direct string comparison
+                try:
+                    conditions = ast.literal_eval(mentionConditionVal)
+                except ValueError, e :
+                    conditions = mentionConditionVal
+
+                if isinstance(conditions,basestring):
+                    self.debugLog("Evaluating condition as string")
+                    if conditions.lower() in ['true','false']:
+                        self.debugLog("Evaluating condition as true/false")
+                        conditions = conditions.lower()
+
+                    if varTestVal == conditions:
+                        msgTxt = mention + msgTxt
+                else:
+                    self.debugLog("Evaluating condition as iterable")
+                    if varTestVal in conditions:
+                        msgTxt = mention + msgTxt
+
+
+        self.debugLog(u"Message Text: %s" % (msgTxt))
+
+        imgURL = pluginAction.props['imageurl'].strip()
+
+        msgUsername = pluginAction.props['username'].strip()
+        msgIcon = pluginAction.props['icon'].strip()
         ##############################################################################################
 
-        # attempt to get gravatar if Slack icon does not exist #######################################
-        if userIconURL is None or userIconURL == "":
-            email = userEmail
-            default = "http://www.gravatar.com/avatar/c4ac5c1a595fe25bad7ddb2eb2d7c2f4?d=identicon"
-            size = 16
-            gravatar_url = "http://www.gravatar.com/avatar/" + hashlib.md5(email.lower()).hexdigest() + "?"
-            gravatar_url += urllib.urlencode({'d':default, 's':str(size)})
-            userIconURL = gravatar_url
-            self.debugLog(u"User icon set to gravatar: %s" % userIconURL)
-        else:
-            self.debugLog(u"User icon url set to: %s" % userIconURL)
-        ##############################################################################################
+        # get Slack user variables
+        # user = self._get_user_info()
+        user = self.config['user']
 
-        # construct the file upload ##################################################################
-        if theFilePath is None or theFilePath == "":
-            self.debugLog(u"No file path was entered")
-        else:
-            theFilePath = theFilePath.strip()
-            if os.path.isfile(theFilePath):
-                opener = urllib2.build_opener(MultipartPostHandler.MultipartPostHandler)
-                params = { "token" : slackToken, "file" : open(theFilePath, "rb") }
-                fileUploadURL = 'https://slack.com/api/files.upload?'
-            else:
-                indigo.server.log (u"Invalid path to the file.")
+        userName = user.get('name','')
+        self.debugLog(u"Username set to %s (bot)" % userName)
+
+        userIconURL = None
+        userEmail = None
+        if 'profile' in user:
+            userIconURL = user['profile'].get('image_24',None)
+            userEmail = user['profile'].get('email',None)
+
+        if userIconURL is None:
+            userIconURL = self._get_gravatar_url(userEmail)
+
+        self.debugLog(u"User icon url set to: %s" % userIconURL)
         ##############################################################################################
 
         # construct and attempt to send payload to Slack #############################################
-        if theUsername is None or theUsername == "":
-            theUsername = userName
-            self.debugLog(u"Username set to %s (bot)" % userName)
-        surl = 'https://hooks.slack.com/services/%s' % URLtoken
-        self.debugLog(u"Slack payload url: %s" % surl)
-        if pluginAction.props['imageurl'] is None or pluginAction.props['imageurl'] == "":
-            if theChannel and theUsername and theText != "":
-                data = 'payload={"channel": "%s", "username": "%s", "link_names":"1", "text": "%s", "icon_emoji": ":%s:"}'% (theChannel, theUsername, theText, theIcon)
-        else:
-            if theChannel and theUsername and theText and theImageURL != "":
-            # if print all([theChannel, theUsername, theText, theImageURL]) == "True"
-                data = 'payload={"channel": "%s", "username": "%s", "link_names":"1", "text": "%s", "icon_emoji": ":%s:","attachments":[{"fallback": "Image is attached", "image_url": "%s"}]}'% (theChannel, theUsername, theText, theIcon, theImageURL)
-        self.debugLog(u"Slack payload: %s" % data)
-        req = urllib2.Request(surl, data)
+        if not msgUsername:
+            msgUsername = userName
 
-        if theFilePath != "":
-            try:
-                opener.open(fileUploadURL, params)
-                res = opener.open(url, params).read()
-                fileRes = simplejson.loads(res)
-                if fileRes.get('ok') in [False]:
-                        resError = fileRes["error"]
-                        self.errorLog(u"Exiting: Message not sent. File not uploaded: %s" % resError)
-                        # sys.exit()
-                self.debugLog(u"File upload response: %s" % res)
-            except urllib2.HTTPError, e:
-                self.errorLog(u"File not uploaded. HTTPError - %s" % unicode(e))
-            except urllib2.URLError, e:
-                self.errorLog(u"File not uploaded. URLError - %s" % unicode(e))
-            except Exception, e:
-                if "invalid literal for int() with base 16: ''" in e:
-                    self.errorLog(u"Exception: invalid literal for int() with base 16")
-                else:
-                    self.errorLog(u"Exception - %s" % unicode(e))
-            else:
-                indigo.server.log (u"File uploaded.")
+        surl = self.config['api']['service_url']
+        self.debugLog(u"Slack payload url: %s" % surl)
+
+        payload = {'link_names': '1'}
+        payload['text'] = "%s" % (msgTxt)
+        payload['channel'] = channel
+        payload['username'] = msgUsername
+        if msgIcon:
+            payload['icon_emoji'] = ":" + msgIcon + ":"
+
+        if imgURL:
+            attachment = {
+                'fallback': "Image is attached",
+                'image_url': imgURL
+            }
+            payload['attachments'] = []
+            payload['attachments'].append(attachment)
+
+        data = "payload=%s" % (simplejson.dumps(payload))
+
+        ## Decode the escaped string created by the dict->str conversion
+        data= data.decode('string_escape')
+
+        result = self._do_slack_request(surl,data,method="POST")
+
+        if result is None:
+            indigo.server.log(u"Failed to send message to slack")
+            return None
+
+        indigo.server.log(u"Message sent.")
+        ##############################################################################################
+
+    def _do_slack_request(self,url,data=None,method="GET"):
+        if method == "GET":
+            return self._do_slack_request_get(url,data)
+        elif method == "POST":
+            return self._do_slack_request_post(url,data)
+        else:
+            self.debugLog(u"Invalid request method for %s" % (url))
+            return None
+
+    def _do_slack_request_post(self,url,data):
+
+        result = None
+        opener = urllib2.build_opener(MultipartPostHandler.MultipartPostHandler)
+
+        self.debugLog("Starting POST request for %s" % (url))
+        self.debugLog("POST Data: %s" % (data))
 
         try:
-            urllib2.urlopen(req)
+            result = opener.open(url, data).read()
+            self.debugLog(u"POST Response: %s" % str(result))
         except urllib2.HTTPError, e:
-            self.errorLog(u"Message not sent. HTTPError - %s" % unicode(e))
+            self.errorLog(u"Failed to get URL. HTTPError - %s" % unicode(e))
         except urllib2.URLError, e:
-            self.errorLog(u"Message not sent. URLError - %s" % unicode(e))
+            self.errorLog(u"Failed to get URL. URLError - %s" % unicode(e))
         except Exception, e:
             if "invalid literal for int() with base 16: ''" in e:
                 self.errorLog(u"Exception: invalid literal for int() with base 16")
             else:
                 self.errorLog(u"Exception - %s" % unicode(e))
-                indigo.server.log (u"Message not sent.")
-        else:
-            indigo.server.log (u"Message sent.")
-        ##############################################################################################
+
+        return result
+
+    def _do_slack_request_get(self,url,data=None):
+        ## Need to convert this to use requests
+        if data is not None:
+            try:
+                params = urllib.urlencode(data)
+            except TypeError:
+                params = data
+
+            url = url + "?" + params
+
+        self.debugLog("Starting GET request for %s" % (url))
+        urlobj = urllib.urlopen(url)
+        realurl = urlobj.geturl()
+
+        response = None
+
+        try:
+            res = urllib2.urlopen(url)
+            response = res.read()
+        except urllib2.HTTPError, e:
+            self.errorLog(u"HTTPError - %s" % unicode(e))
+        except urllib2.URLError, e:
+            self.errorLog(u"URLError - %s" % unicode(e))
+        except Exception, e:
+            if "invalid literal for int() with base 16: ''" in e:
+                self.errorLog(u"Obscure bug in Python 2.5.")
+            else:
+                self.errorLog(u"Exception - %s" % unicode(e))
+
+        return response

@@ -1,7 +1,16 @@
 ## Summary
-This plugin extends [Indigo](http://www.indigodomo.com) allowing it to send messages to [Slack](https://slack.com), optionally with attachments and file upload.
+This plugin extends [Indigo](http://www.indigodomo.com) allowing it to send messages to [Slack](https://slack.com), optionally with attachments and file upload.  This is a partial re-write of [Slack-Notify](https://github.com/achterberg/slack-notify) by [achterberg](https://github.com/achterberg).
+
+Some notable changes:
+* Channel and user lookups are moved to Plugin startup (instead of at each dialog screen).  A menu option has been added to refresh this data as needed.
+* Added option for conditional channel mentions (@channel) when posting a message
+* Added separate action for file uploads
+* Recursive variable substitution
+
+
+
 ## Requirements
-* [Indigo 6](http://www.indigodomo.com/index.html) or later (pro version only)
+* [Indigo 7](http://www.indigodomo.com/index.html) or later (pro version only)
 * A Slack Team is required. Register for an account at [Slack](https://slack.com) and set up a team
 * Optional: Create a Slack channel to be used for Slack Notify (recommended), or use one of the defaults
 
@@ -15,7 +24,7 @@ This plugin extends [Indigo](http://www.indigodomo.com) allowing it to send mess
 
 ## Configuration
 ###Configure Plugin
-In the menu: Indigo 6/Plugins/Slack Notify/Configure...
+In the menu: Indigo 7/Plugins/Slack Notify/Configure...
   
 ####WebHook Token
   * Set up an incoming webhook integration by reading and following the link on: https://api.slack.com/incoming-webhooks
@@ -51,13 +60,10 @@ In the menu: Indigo 6/Plugins/Slack Notify/Configure...
 * The plugin will attempt to get your [gravatar](http://gravatar.com) using your Slack email address if a Slack icon does not exist.
 
 ## Dependencies
-Indigo plugins (the IOM and SDK) use Python 2.5
+Indigo plugins (the IOM and SDK) use Python 2.7
 
 ## Plugin ID
 To programmatically restart the plugin, the Plugin ID is: com.bot.indigoplugin.slack
 
 ## Uninstall
-Remove “/Library/Application Support/Perceptive Automation/Indigo 6/Plugins/Slack.indigoPlugin” (or check in the Disabled Plugins folder if disabled) and restart the Indigo Server
-
-## GitHub Gist
-For a simple python script version: [indigotoslack](https://gist.github.com/achterberg/cbd46bc3b9cdb391eed7)
+Remove “/Library/Application Support/Perceptive Automation/Indigo 7/Plugins/Slack.indigoPlugin” (or check in the Disabled Plugins folder if disabled) and restart the Indigo Server
