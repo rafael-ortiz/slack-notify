@@ -37,7 +37,7 @@
 
             <Field id="label02"
                     type = "label"
-                    alignText="center"
+                    alignText="center"  
                     fontSize = "small">
                 <Label>Optional, defaults to your username and posted as a bot</Label>
             </Field>
@@ -62,15 +62,10 @@
                     type="label"
                     fontSize="small"
                     fontColor="black">
-                <Label>    &#8226; Insert indigo variable values %%v:VARIABLEID%%
-    &#8226; Insert indigo device state values %%d:DEVICEID:STATEKEY%%
-    &#8226; For text with newline: This is a line of text.\nAnd this is another one
-    &#8226; Enclose an URL in angle brackets to create a link: &lt;https://slack.com&gt;
-    &#8226; To display hyperlinked text instead of an actual URL, use the pipe character:
-        &lt;https://alert-system.com/alerts/1234|Click here&gt; for details!
-    &#8226; Surround text for *bold* `code` _italic_ ```block_quote```
-    &#8226; Place &gt; at the beginning of a line to indent text as a blockquote
-    &#8226; Add emoticons :smile:</Label>
+                <Label>
+                    &#8226; Insert indigo variable values %%v:VARIABLEID%%
+                    &#8226; Insert indigo device state values %%d:DEVICEID:STATEKEY%%
+                </Label>
             </Field>
 
             <Field id="sep3"
@@ -110,6 +105,97 @@
             <Field id="sep5"
                     type="separator" />
 
+            <Field type="checkbox" id="enableMention" defaultValue="true">
+                <Label></Label>
+                <Description>Mention @channel when posting message</Description>
+            </Field>
+
+            <Field
+                type="checkbox" 
+                id="conditionalMention"
+                defaultValue="false"
+                visibleBindingId="enableMention"
+                visibleBindingValue="true">
+                <Label></Label>
+                <Description>Mention channel only if variable below meets the condition</Description>
+            </Field>
+            
+            <Field 
+                id="mentionConditionVar"
+                type="menu"
+                visibleBindingId="conditionalMention"
+                visibleBindingValue="true">
+                <Label>Variable:</Label>
+                <List class="indigo.variables"/>
+            </Field>
+
+            <Field id="mentionConditionVal"
+                    type="textfield"
+                    defaultValue="true"
+                    visibleBindingId="conditionalMention"
+                    visibleBindingValue="true"
+                    tooltip = "">
+                <Label>Condition:</Label>
+            </Field>
+
+        </ConfigUI>
+    </Action>
+    <Action id="upload" uiPath="NotificationActions">
+        <Name>Slack File Upload</Name>
+        <CallbackMethod>upload</CallbackMethod>
+        <ConfigUI>
+
+            <Field id="channel" type="menu">
+                <Label>Channel:</Label>
+                <List class="self" method="channelListGenerator"/>
+            </Field>
+
+            <Field id="directMessage"
+                    type="textfield"
+                    defaultValue=""
+                    tooltip = "Direct Message with @username, @channel, @group or @everyone.">
+                <Label>Direct Message:</Label>
+            </Field>
+
+            <Field id="label01"
+                    type = "label"
+                    alignText="center"
+                    fontSize = "small">
+                <Label>Required: Select a channel from the list above OR Direct Message to display the file</Label>
+            </Field>
+
+            <Field id="sep1"
+                    type="separator" />
+
+            <Field id="username"
+                    type="textfield"
+                    defaultValue="slack"
+                    tooltip = "Enter a name to post as WITHOUT a preceeding @.">
+                <Label>Name:</Label>
+            </Field>
+
+            <Field id="label02"
+                    type = "label"
+                    alignText="center"
+                    fontSize = "small">
+                <Label>Optional, defaults to your username and posted as a bot</Label>
+            </Field>
+
+            <Field id="sep2"
+                    type="separator" />
+
+            <Field id="filetitle"
+                    type="textfield"
+                    tooltip = "File Title.">
+                <Label>Title:</Label>
+            </Field>
+
+            <Field id="filecomment"
+                    type="textfield"
+                    tooltip = "File Comment">
+                <Label>Comment:</Label>
+            </Field>
+
             <Field id="filename"
                     type="textfield"
                     defaultValue=""
@@ -122,9 +208,10 @@
                     alignText="center"
                     fontSize = "small">
                 <Label>Optional: Enter the path to a file
-                ex: /Library/Application Support/Perceptive Automation/Indigo 6/Logs/indigo_log.txt</Label>
+                ex: /Library/Application Support/Perceptive Automation/Indigo 6/Logs/indigo_log.txt
+                &#8226; Insert indigo variable values %%v:VARIABLEID%%
+                </Label>
             </Field>
-
         </ConfigUI>
     </Action>
 </Actions>
