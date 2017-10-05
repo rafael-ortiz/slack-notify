@@ -11,22 +11,6 @@
 		<Label>Enter the information below from your Slack configuration</Label>
 	</Field>
 
-	<Field
-	    id="urltoken"
-	    type="textfield"
-	    defaultValue=""
-	    tooltip = "Enter the Slack Webhook URL Token (required).">
-		<Label>WebHook Token:</Label>
-	</Field>
-
-	<Field
-		id = "label01"
-		type = "label"
-		alignText="center"
-		fontSize = "small">
-		<Label>ONLY enter the part of the URL after https://hooks.slack.com/services/</Label>
-	</Field>
-
     <Field
     id = "separator01"
     type = "separator"/>

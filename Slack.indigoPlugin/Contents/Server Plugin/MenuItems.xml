@@ -2,6 +2,6 @@
 <MenuItems>
     <MenuItem id="menu1">
         <Name>Refresh Slack Data</Name>
-        <CallbackMethod>refresh_slack_data</CallbackMethod>
+        <CallbackMethod>refreshSlackData</CallbackMethod>
     </MenuItem>
 </MenuItems>
